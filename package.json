@@ -1,0 +1,97 @@
+{
+  "name": "css-action",
+  "displayName": "css-action",
+  "description": "A vscode extension help editing scss/less/css file with color replace and px convert.",
+  "version": "1.3.1",
+  "publisher": "leeyuze",
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "configuration": {
+      "title": "Css Action",
+      "properties": {
+        "cssAction.variablesFiles": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "style variables files path."
+        },
+        "cssAction.rootFontSize": {
+          "type": "integer",
+          "description": "root font size for rem calc.",
+          "default": 16
+        },
+        "cssAction.pxReplaceOptions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "px replace options, '_REM_RESULT_' for rem calc result based on rootFontSize, '_VAR_NAME_' for var name, '_MATCHED_TEXT_' for origin text",
+          "default": [
+            "<%= _VAR_NAME_ %>",
+            "<%= _REM_RESULT_ %>",
+            "px2rem(<%= _MATCHED_TEXT_ %>)"
+          ]
+        },
+        "cssAction.colorReplaceOptions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "color replace options, '_VAR_NAME_' for var name, '_MATCHED_TEXT_' for origin text",
+          "default": [
+            "<%= _VAR_NAME_ %>"
+          ]
+        }
+      }
+    },
+    "commands": [
+      {
+        "command": "cssAction.pickVariable",
+        "title": "CssAction: Pick css variable"
+      }
+    ]
+  },
+  "activationEvents": [
+    "onLanguage:scss",
+    "onLanguage:less",
+    "onLanguage:vue"
+  ],
+  "scripts": {
+    "vscode:prepublish": "yarn run package",
+    "compile": "webpack",
+    "watch": "webpack --watch",
+    "package": "webpack --mode production --devtool hidden-source-map",
+    "compile-tests": "tsc -p . --outDir out",
+    "watch-tests": "tsc -p . -w --outDir out",
+    "pretest": "yarn run compile-tests && yarn run compile && yarn run lint",
+    "lint": "eslint src --ext ts",
+    "test": "vscode-test"
+  },
+  "devDependencies": {
+    "@types/ejs": "^3.1.5",
+    "@types/mocha": "^10.0.6",
+    "@types/node": "20.x",
+    "@types/tinycolor2": "^1.4.6",
+    "@types/vscode": "^1.90.0",
+    "@typescript-eslint/eslint-plugin": "^7.11.0",
+    "@typescript-eslint/parser": "^7.11.0",
+    "@vscode/test-cli": "^0.0.9",
+    "@vscode/test-electron": "^2.4.0",
+    "eslint": "^8.57.0",
+    "ts-loader": "^9.5.1",
+    "typescript": "^5.4.5",
+    "webpack": "^5.92.0",
+    "webpack-cli": "^5.1.4"
+  },
+  "dependencies": {
+    "ejs": "^3.1.10",
+    "tinycolor2": "^1.6.0"
+  }
+}
