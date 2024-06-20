@@ -1,6 +1,6 @@
 import * as vscode from "vscode";
-import { readFileSync } from "fs";
-import { join } from "path";
+import { readFileSync, readdirSync, statSync } from "fs";
+import path, { join } from "path";
 import { render } from "ejs";
 import tinycolor from "tinycolor2";
 
@@ -15,6 +15,8 @@ let variableMapper = new Map<string, Set<string>>();
 let rootFontSize: number;
 let pxReplaceOptions: string[];
 let colorReplaceOptions: string[];
+let diagnosticCollection: vscode.DiagnosticCollection;
+let isAutoReplace: boolean;
 
 function normalizeSizeValue(str: string) {
   const sizeReg = /\b\d+(px|rem|em)\b/g;
@@ -132,31 +134,95 @@ export async function showQuickPick() {
 }
 
 function loadVariables() {
+  let allVariableFiles: string[] = [];
+
   if (
-    variablesFilePaths &&
-    variablesFilePaths.length > 0 &&
+    variablesDirectory &&
     vscode.workspace.workspaceFolders &&
     vscode.workspace.workspaceFolders.length > 0
   ) {
     const workspacePath = vscode.workspace.workspaceFolders[0].uri.fsPath;
-    const fullPaths = variablesFilePaths.map((filePath) =>
-      join(workspacePath, filePath)
-    );
-    variableMapper = getVariablesMapper(fullPaths);
-  } else {
-    vscode.window.showErrorMessage(
-      "No workspace folder is open or variables file paths are not set."
-    );
+    const fullDirectoryPath = path.join(workspacePath, variablesDirectory);
+    const extensions = [".scss", ".css", ".less"];
+    allVariableFiles = getAllFilesInDirectory(fullDirectoryPath, extensions);
   }
+
+  if (variablesFilePaths && variablesFilePaths.length > 0) {
+    const workspacePath = vscode.workspace.workspaceFolders![0].uri.fsPath;
+    const fullFilePaths = variablesFilePaths.map((filePath) =>
+      path.join(workspacePath, filePath)
+    );
+    allVariableFiles = allVariableFiles.concat(fullFilePaths);
+  }
+
+  if (allVariableFiles.length > 0) {
+    variableMapper = getVariablesMapper(allVariableFiles);
+  } else {
+    vscode.window.showErrorMessage("No variable files or directories are set.");
+  }
+}
+function getAllFilesInDirectory(dir: string, extensions: string[]): string[] {
+  let results: string[] = [];
+  const list = readdirSync(dir);
+  list.forEach((file) => {
+    const filePath = path.join(dir, file);
+    const stat = statSync(filePath);
+    if (stat && stat.isDirectory()) {
+      results = results.concat(getAllFilesInDirectory(filePath, extensions));
+    } else if (extensions.some((ext) => filePath.endsWith(ext))) {
+      results.push(filePath);
+    }
+  });
+  return results;
+}
+
+function updateDiagnostics(document: vscode.TextDocument) {
+  const diagnostics: vscode.Diagnostic[] = [];
+  const text = document.getText();
+  const colorRegEx =
+    /(#(?:[0-9a-fA-F]{3,8})|rgba?\((?:\d{1,3}%?,\s?){3,4}\)|hsla?\((?:\d{1,3}%?,\s?){2,4}\)|\b[a-zA-Z]+\b)/gi;
+  const variableRegEx =
+    /[@$--]\w+\s*:\s*#(?:[0-9a-fA-F]{3,8})|rgba?\((?:\d{1,3}%?,\s?){3,4}\)|hsla?\((?:\d{1,3}%?,\s?){2,4}\)/gi;
+  let match: RegExpExecArray | null;
+
+  while ((match = colorRegEx.exec(text)) !== null) {
+    const colorValue = match[0].trim();
+    const normalizedColor = normalizeColorValue(colorValue);
+
+    // 忽略 CSS 变量定义
+    if (!variableRegEx.test(text.substring(0, match.index + match[0].length))) {
+      if (normalizedColor && variableMapper.has(normalizedColor)) {
+        const startPos = document.positionAt(match.index);
+        const endPos = document.positionAt(match.index + colorValue.length);
+        const range = new vscode.Range(startPos, endPos);
+        const diagnostic = new vscode.Diagnostic(
+          range,
+          `Color value ${colorValue} is already mapped to a variable.`,
+          vscode.DiagnosticSeverity.Error
+        );
+        diagnostics.push(diagnostic);
+
+        if (isAutoReplace) {
+          const variableName = Array.from(variableMapper.get(normalizedColor)!)[0]; // 取第一个变量名
+          const edit = new vscode.WorkspaceEdit();
+          edit.replace(document.uri, range, variableName);
+          vscode.workspace.applyEdit(edit);
+        }
+      }
+    }
+  }
+
+  diagnosticCollection.set(document.uri, diagnostics);
 }
 
 function init(context: vscode.ExtensionContext) {
-  const workbenchConfig = vscode.workspace.getConfiguration("cssAction");
+  const workbenchConfig = vscode.workspace.getConfiguration("cssActionPro");
   variablesFilePaths = workbenchConfig.get<string[]>("variablesFiles");
   variablesDirectory = workbenchConfig.get<string>("variablesDirectory");
   rootFontSize = workbenchConfig.get<number>("rootFontSize")!;
   pxReplaceOptions = workbenchConfig.get<string[]>("pxReplaceOptions")!;
   colorReplaceOptions = workbenchConfig.get<string[]>("colorReplaceOptions")!;
+  isAutoReplace = workbenchConfig.get<boolean>("autoReplace") || false;
 
   context.subscriptions.forEach((s) => s.dispose());
 
@@ -175,15 +241,17 @@ function init(context: vscode.ExtensionContext) {
 
     context.subscriptions.push(
       vscode.workspace.onDidSaveTextDocument((document) => {
-        const workspacePath = vscode.workspace.workspaceFolders![0].uri.fsPath;
-        if (
-          variablesFilePaths &&
-          variablesFilePaths.some(
-            (filePath) => document.uri.fsPath === join(workspacePath, filePath)
-          )
-        ) {
-          loadVariables();
-        }
+        loadVariables();
+      })
+    );
+  }
+
+  if (variablesDirectory) {
+    // 监听这些文件的保存事件
+    loadVariables();
+    context.subscriptions.push(
+      vscode.workspace.onDidSaveTextDocument((document) => {
+        loadVariables();
       })
     );
   }
@@ -200,6 +268,23 @@ function init(context: vscode.ExtensionContext) {
 
   context.subscriptions.push(
     vscode.commands.registerCommand("cssAction.pickVariable", showQuickPick)
+  );
+
+  // 初始化诊断集合
+  diagnosticCollection = vscode.languages.createDiagnosticCollection(
+    "variableDiagnostics"
+  );
+  context.subscriptions.push(diagnosticCollection);
+
+  // 注册文档更改和保存事件以更新诊断信息
+  vscode.workspace.onDidChangeTextDocument((event) =>
+    updateDiagnostics(event.document)
+  );
+  vscode.workspace.onDidOpenTextDocument((document) =>
+    updateDiagnostics(document)
+  );
+  vscode.workspace.onDidSaveTextDocument((document) =>
+    updateDiagnostics(document)
   );
 }
 
