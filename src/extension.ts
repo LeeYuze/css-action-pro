@@ -43,12 +43,48 @@ function getVariablesMapper(paths: string[]) {
   try {
     for (const path of paths) {
       const text = readFileSync(path, { encoding: "utf8" });
-      const matches = text.matchAll(
+      const objectMatches = text.matchAll(
+        /((?:\$|@|--)[\w-]+)\s*:\s*{([^}]+)}/gi
+      );
+      const variableMatches = text.matchAll(
         /(?<!\/\/\s*)((?:\$|@|--)[\w-]+)\s*:[ \t]*([^;\n]+)/gi
       );
-      if (matches) {
-        for (const match of matches) {
+      if (objectMatches) {
+        for (const match of objectMatches) {
+          const [fullMatch, objectVarName, objectVarBody] = match;
+
+          // 处理对象形式的变量
+          const objectVarNameWithoutSymbol = objectVarName.replace(/[@$]/, "");
+          const objectMatches = objectVarBody.matchAll(
+            /([\w-]+)\s*:\s*([^;\n]+);?/gi
+          );
+
+          for (const objectMatch of objectMatches) {
+            const [key, value] = [objectMatch[1], objectMatch[2]];
+
+            // 构建变量名格式为 @bg[key]
+            const variableName = `@${objectVarNameWithoutSymbol}[${key}]`;
+
+            // 将变量值存储到 varMapper 中
+            const normalizedValue =
+              normalizeSizeValue(value) ||
+              normalizeColorValue(value) ||
+              value ||
+              "";
+
+            if (!varMapper.get(normalizedValue)) {
+              varMapper.set(normalizedValue, new Set());
+            }
+            varMapper.get(normalizedValue)!.add(variableName);
+          }
+        }
+      }
+      if (variableMatches) {
+        for (const match of variableMatches) {
           let [varName, varValue] = [match[1], match[2]];
+          if (varValue[0] !== "#") {
+            continue;
+          }
           varValue =
             normalizeSizeValue(varValue) ||
             normalizeColorValue(varValue) ||
@@ -65,6 +101,7 @@ function getVariablesMapper(paths: string[]) {
         }
       }
     }
+
     return varMapper;
   } catch (error) {
     return new Map();
