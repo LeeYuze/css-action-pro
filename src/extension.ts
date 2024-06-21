@@ -214,15 +214,20 @@ function getAllFilesInDirectory(dir: string, extensions: string[]): string[] {
   return results;
 }
 
-function updateDiagnostics(document: vscode.TextDocument) {
-  const diagnostics: vscode.Diagnostic[] = [];
+function diagnosticsCore(
+  document: vscode.TextDocument,
+  callback: (payload: {
+    normalizedColor: string;
+    colorValue: string;
+    range: vscode.Range;
+  }) => void
+) {
   const text = document.getText();
   const colorRegEx =
     /(#(?:[0-9a-fA-F]{3,8})|rgba?\((?:\d{1,3}%?,\s?){3,4}\)|hsla?\((?:\d{1,3}%?,\s?){2,4}\)|\b[a-zA-Z]+\b)/gi;
   const variableRegEx =
     /[@$--]\w+\s*:\s*#(?:[0-9a-fA-F]{3,8})|rgba?\((?:\d{1,3}%?,\s?){3,4}\)|hsla?\((?:\d{1,3}%?,\s?){2,4}\)/gi;
   let match: RegExpExecArray | null;
-
   while ((match = colorRegEx.exec(text)) !== null) {
     const colorValue = match[0].trim();
     const normalizedColor = normalizeColorValue(colorValue);
@@ -233,17 +238,30 @@ function updateDiagnostics(document: vscode.TextDocument) {
         const startPos = document.positionAt(match.index);
         const endPos = document.positionAt(match.index + colorValue.length);
         const range = new vscode.Range(startPos, endPos);
-        const diagnostic = new vscode.Diagnostic(
+        const payload = {
+          normalizedColor,
+          colorValue,
           range,
-          `Color value ${colorValue} is already mapped to a variable.`,
-          vscode.DiagnosticSeverity.Error
-        );
-        diagnostics.push(diagnostic);
+        };
+        callback(payload);
       }
     }
   }
+}
 
-  diagnosticCollection.set(document.uri, diagnostics);
+function updateDiagnostics(document: vscode.TextDocument) {
+  const diagnostics: vscode.Diagnostic[] = [];
+
+  diagnosticsCore(document, ({ range, colorValue }) => {
+    const diagnostic = new vscode.Diagnostic(
+      range,
+      `Color value ${colorValue} is already mapped to a variable.`,
+      vscode.DiagnosticSeverity.Error
+    );
+
+    diagnostics.push(diagnostic);
+    diagnosticCollection.set(document.uri, diagnostics);
+  });
 }
 
 function autoReplaceVariables(
@@ -253,31 +271,12 @@ function autoReplaceVariables(
   if (!isAutoReplace) {
     return;
   }
-  const text = document.getText();
-  const colorRegEx =
-    /(#(?:[0-9a-fA-F]{3,8})|rgba?\((?:\d{1,3}%?,\s?){3,4}\)|hsla?\((?:\d{1,3}%?,\s?){2,4}\)|\b[a-zA-Z]+\b)/gi;
-  const variableRegEx =
-    /[@$--]\w+\s*:\s*#(?:[0-9a-fA-F]{3,8})|rgba?\((?:\d{1,3}%?,\s?){3,4}\)|hsla?\((?:\d{1,3}%?,\s?){2,4}\)/gi;
-  let match: RegExpExecArray | null;
-  while ((match = colorRegEx.exec(text)) !== null) {
-    const colorValue = match[0].trim();
-    const normalizedColor = normalizeColorValue(colorValue);
-
-    // 忽略 CSS 变量定义
-    if (!variableRegEx.test(text.substring(0, match.index + match[0].length))) {
-      if (normalizedColor && variableMapper.has(normalizedColor)) {
-        const startPos = document.positionAt(match.index);
-        const endPos = document.positionAt(match.index + colorValue.length);
-        const range = new vscode.Range(startPos, endPos);
-        const variableName = Array.from(
-          variableMapper.get(normalizedColor)!
-        )[0]; // 取第一个变量名
-        const edit = new vscode.WorkspaceEdit();
-        edit.replace(document.uri, range, variableName);
-        vscode.workspace.applyEdit(edit);
-      }
-    }
-  }
+  diagnosticsCore(document, ({ normalizedColor, range }) => {
+    const variableName = Array.from(variableMapper.get(normalizedColor)!)[0]; // 取第一个变量名
+    const edit = new vscode.WorkspaceEdit();
+    edit.replace(document.uri, range, variableName);
+    vscode.workspace.applyEdit(edit);
+  });
 }
 
 function getWorkbenchConfig() {
