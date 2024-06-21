@@ -17,6 +17,7 @@ let pxReplaceOptions: string[];
 let colorReplaceOptions: string[];
 let diagnosticCollection: vscode.DiagnosticCollection;
 let isAutoReplace: boolean;
+let allVariableFiles: string[] = [];
 
 function normalizeSizeValue(str: string) {
   const sizeReg = /\b\d+(px|rem|em)\b/g;
@@ -134,8 +135,6 @@ export async function showQuickPick() {
 }
 
 function loadVariables() {
-  let allVariableFiles: string[] = [];
-
   if (
     variablesDirectory &&
     vscode.workspace.workspaceFolders &&
@@ -158,7 +157,7 @@ function loadVariables() {
   if (allVariableFiles.length > 0) {
     variableMapper = getVariablesMapper(allVariableFiles);
   } else {
-    vscode.window.showErrorMessage("No variable files or directories are set.");
+    // vscode.window.showErrorMessage("No variable files or directories are set.");
   }
 }
 function getAllFilesInDirectory(dir: string, extensions: string[]): string[] {
@@ -201,9 +200,37 @@ function updateDiagnostics(document: vscode.TextDocument) {
           vscode.DiagnosticSeverity.Error
         );
         diagnostics.push(diagnostic);
+      }
+    }
+  }
 
+  diagnosticCollection.set(document.uri, diagnostics);
+}
+
+function autoReplaceVariables(
+  document: vscode.TextDocument,
+  isAutoReplace: boolean
+) {
+  const text = document.getText();
+  const colorRegEx =
+    /(#(?:[0-9a-fA-F]{3,8})|rgba?\((?:\d{1,3}%?,\s?){3,4}\)|hsla?\((?:\d{1,3}%?,\s?){2,4}\)|\b[a-zA-Z]+\b)/gi;
+  const variableRegEx =
+    /[@$--]\w+\s*:\s*#(?:[0-9a-fA-F]{3,8})|rgba?\((?:\d{1,3}%?,\s?){3,4}\)|hsla?\((?:\d{1,3}%?,\s?){2,4}\)/gi;
+  let match: RegExpExecArray | null;
+  while ((match = colorRegEx.exec(text)) !== null) {
+    const colorValue = match[0].trim();
+    const normalizedColor = normalizeColorValue(colorValue);
+
+    // 忽略 CSS 变量定义
+    if (!variableRegEx.test(text.substring(0, match.index + match[0].length))) {
+      if (normalizedColor && variableMapper.has(normalizedColor)) {
+        const startPos = document.positionAt(match.index);
+        const endPos = document.positionAt(match.index + colorValue.length);
+        const range = new vscode.Range(startPos, endPos);
         if (isAutoReplace) {
-          const variableName = Array.from(variableMapper.get(normalizedColor)!)[0]; // 取第一个变量名
+          const variableName = Array.from(
+            variableMapper.get(normalizedColor)!
+          )[0]; // 取第一个变量名
           const edit = new vscode.WorkspaceEdit();
           edit.replace(document.uri, range, variableName);
           vscode.workspace.applyEdit(edit);
@@ -211,8 +238,6 @@ function updateDiagnostics(document: vscode.TextDocument) {
       }
     }
   }
-
-  diagnosticCollection.set(document.uri, diagnostics);
 }
 
 function init(context: vscode.ExtensionContext) {
@@ -278,14 +303,30 @@ function init(context: vscode.ExtensionContext) {
 
   // 注册文档更改和保存事件以更新诊断信息
   vscode.workspace.onDidChangeTextDocument((event) =>
-    updateDiagnostics(event.document)
+    allVariableFiles.forEach((file) => {
+      if (event.document.uri.fsPath === file) {
+        updateDiagnostics(event.document);
+      }
+    })
   );
   vscode.workspace.onDidOpenTextDocument((document) =>
-    updateDiagnostics(document)
+    allVariableFiles.forEach((file) => {
+      if (document.uri.fsPath === file) {
+        updateDiagnostics(document);
+      }
+    })
   );
-  vscode.workspace.onDidSaveTextDocument((document) =>
-    updateDiagnostics(document)
-  );
+  vscode.workspace.onDidSaveTextDocument((document: any) => {
+    isAutoReplace = workbenchConfig.get<boolean>("autoReplace") || false;
+
+    allVariableFiles.forEach((file) => {
+      if (document.uri.fsPath === file) {
+        //自动修改
+        updateDiagnostics(document);
+        autoReplaceVariables(document, isAutoReplace);
+      }
+    });
+  });
 }
 
 export function activate(context: vscode.ExtensionContext) {
