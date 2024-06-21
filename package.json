@@ -2,7 +2,7 @@
   "name": "css-action-pro",
   "displayName": "css-action-pro",
   "description": "A vscode extension help editing scss/less/css file with color replace and px convert.",
-  "version": "1.3.9",
+  "version": "1.4.0",
   "publisher": "leeyuze",
   "engines": {
     "vscode": "^1.90.0"
@@ -20,7 +20,7 @@
           "description": "auto replace style variables."
         },
         "cssActionPro.variablesDirectory": {
-          "type": "array",
+          "type": "string",
           "description": "style variables files folders."
         },
         "cssActionPro.rootFontSize": {

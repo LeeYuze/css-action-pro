@@ -9,6 +9,7 @@ enum BultinTemplateVar {
   varName = "_VAR_NAME_",
   matchedText = "_MATCHED_TEXT_",
 }
+let workbenchConfig: vscode.WorkspaceConfiguration;
 let variablesDirectory: string | undefined;
 let variablesFilePaths: string[] | undefined;
 let variableMapper = new Map<string, Set<string>>();
@@ -17,7 +18,6 @@ let pxReplaceOptions: string[];
 let colorReplaceOptions: string[];
 let diagnosticCollection: vscode.DiagnosticCollection;
 let isAutoReplace: boolean;
-let allVariableFiles: string[] = [];
 
 function normalizeSizeValue(str: string) {
   const sizeReg = /\b\d+(px|rem|em)\b/g;
@@ -135,6 +135,8 @@ export async function showQuickPick() {
 }
 
 function loadVariables() {
+  let allVariableFiles: string[] = [];
+
   if (
     variablesDirectory &&
     vscode.workspace.workspaceFolders &&
@@ -157,7 +159,7 @@ function loadVariables() {
   if (allVariableFiles.length > 0) {
     variableMapper = getVariablesMapper(allVariableFiles);
   } else {
-    // vscode.window.showErrorMessage("No variable files or directories are set.");
+    vscode.window.showErrorMessage("No variable files or directories are set.");
   }
 }
 function getAllFilesInDirectory(dir: string, extensions: string[]): string[] {
@@ -211,6 +213,9 @@ function autoReplaceVariables(
   document: vscode.TextDocument,
   isAutoReplace: boolean
 ) {
+  if (!isAutoReplace) {
+    return;
+  }
   const text = document.getText();
   const colorRegEx =
     /(#(?:[0-9a-fA-F]{3,8})|rgba?\((?:\d{1,3}%?,\s?){3,4}\)|hsla?\((?:\d{1,3}%?,\s?){2,4}\)|\b[a-zA-Z]+\b)/gi;
@@ -227,31 +232,44 @@ function autoReplaceVariables(
         const startPos = document.positionAt(match.index);
         const endPos = document.positionAt(match.index + colorValue.length);
         const range = new vscode.Range(startPos, endPos);
-        if (isAutoReplace) {
-          const variableName = Array.from(
-            variableMapper.get(normalizedColor)!
-          )[0]; // 取第一个变量名
-          const edit = new vscode.WorkspaceEdit();
-          edit.replace(document.uri, range, variableName);
-          vscode.workspace.applyEdit(edit);
-        }
+        const variableName = Array.from(
+          variableMapper.get(normalizedColor)!
+        )[0]; // 取第一个变量名
+        const edit = new vscode.WorkspaceEdit();
+        edit.replace(document.uri, range, variableName);
+        vscode.workspace.applyEdit(edit);
       }
     }
   }
 }
 
+function getWorkbenchConfig() {
+  workbenchConfig = vscode.workspace.getConfiguration("cssActionPro");
+  return workbenchConfig;
+}
+
 function init(context: vscode.ExtensionContext) {
-  const workbenchConfig = vscode.workspace.getConfiguration("cssActionPro");
+  workbenchConfig = getWorkbenchConfig();
   variablesFilePaths = workbenchConfig.get<string[]>("variablesFiles");
   variablesDirectory = workbenchConfig.get<string>("variablesDirectory");
   rootFontSize = workbenchConfig.get<number>("rootFontSize")!;
   pxReplaceOptions = workbenchConfig.get<string[]>("pxReplaceOptions")!;
   colorReplaceOptions = workbenchConfig.get<string[]>("colorReplaceOptions")!;
-  isAutoReplace = workbenchConfig.get<boolean>("autoReplace") || false;
+
+  const supportedLanguages = ColorVarReplacer.documentSelectors.map(
+    (item) => item.language
+  );
+
+  const isSupportbyLanguages = (document: vscode.TextDocument) => {
+    if (!supportedLanguages.includes(document.languageId)) {
+      return false;
+    }
+    return true;
+  };
 
   context.subscriptions.forEach((s) => s.dispose());
 
-  if (variablesFilePaths) {
+  if (variablesDirectory || variablesFilePaths) {
     loadVariables();
 
     context.subscriptions.push(
@@ -266,16 +284,10 @@ function init(context: vscode.ExtensionContext) {
 
     context.subscriptions.push(
       vscode.workspace.onDidSaveTextDocument((document) => {
-        loadVariables();
-      })
-    );
-  }
+        if (!isSupportbyLanguages(document)) {
+          return;
+        }
 
-  if (variablesDirectory) {
-    // 监听这些文件的保存事件
-    loadVariables();
-    context.subscriptions.push(
-      vscode.workspace.onDidSaveTextDocument((document) => {
         loadVariables();
       })
     );
@@ -301,32 +313,43 @@ function init(context: vscode.ExtensionContext) {
   );
   context.subscriptions.push(diagnosticCollection);
 
-  // 注册文档更改和保存事件以更新诊断信息
-  vscode.workspace.onDidChangeTextDocument((event) =>
-    allVariableFiles.forEach((file) => {
-      if (event.document.uri.fsPath === file) {
-        updateDiagnostics(event.document);
+  // 修改文件
+  context.subscriptions.push(
+    vscode.workspace.onDidChangeTextDocument((event) => {
+      if (!isSupportbyLanguages(event.document)) {
+        return;
       }
-    })
-  );
-  vscode.workspace.onDidOpenTextDocument((document) =>
-    allVariableFiles.forEach((file) => {
-      if (document.uri.fsPath === file) {
-        updateDiagnostics(document);
-      }
-    })
-  );
-  vscode.workspace.onDidSaveTextDocument((document: any) => {
-    isAutoReplace = workbenchConfig.get<boolean>("autoReplace") || false;
 
-    allVariableFiles.forEach((file) => {
-      if (document.uri.fsPath === file) {
-        //自动修改
-        updateDiagnostics(document);
-        autoReplaceVariables(document, isAutoReplace);
+      updateDiagnostics(event.document);
+    })
+  );
+  // 打开文件
+  context.subscriptions.push(
+    vscode.workspace.onDidOpenTextDocument((document) => {
+      if (!isSupportbyLanguages(document)) {
+        return;
       }
-    });
-  });
+
+      updateDiagnostics(document);
+    })
+  );
+  // 保存文件
+  context.subscriptions.push(
+    vscode.workspace.onDidSaveTextDocument((document) => {
+      if (!isSupportbyLanguages(document)) {
+        return;
+      }
+      workbenchConfig = getWorkbenchConfig();
+      isAutoReplace = workbenchConfig.get<boolean>("autoReplace") || false;
+
+      if (isAutoReplace) {
+        autoReplaceVariables(document, isAutoReplace);
+        updateDiagnostics(document);
+      } else {
+        updateDiagnostics(document);
+      }
+    })
+  );
 }
 
 export function activate(context: vscode.ExtensionContext) {
