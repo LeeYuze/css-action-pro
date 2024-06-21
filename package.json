@@ -1,6 +1,6 @@
 {
   "name": "css-action-pro",
-  "displayName": "css-action-pro",
+  "displayName": "css-action-pro - css variables helper",
   "description": "A vscode extension help editing scss/less/css file with color replace and px convert.",
   "version": "1.4.1",
   "publisher": "leeyuze",
