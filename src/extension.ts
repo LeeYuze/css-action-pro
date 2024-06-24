@@ -39,13 +39,11 @@ function normalizeColorValue(str: string) {
 }
 
 /**
- * 删除Map中，less文件下已注释的变量
- * @param text 文件内容
+ * 找到哪几行是以less和:root形式命名的变量
+ * @param text
+ * @returns
  */
-function removeInvalidVariablesWithLess(
-  varMapper: Map<string, Set<string>>,
-  text: string
-) {
+function objectVariableLineMap(text: string) {
   const textSplit = text.split("\n");
 
   // 记录对象定义遍历时，这个对象所在的行数
@@ -57,7 +55,12 @@ function removeInvalidVariablesWithLess(
 
   for (let lineNumber = 0; lineNumber < textSplit.length; lineNumber++) {
     const textLineTrim = textSplit[lineNumber].trim();
-    if (textLineTrim.endsWith("{")) {
+    console.log(textLineTrim);
+
+    if (
+      (textLineTrim.startsWith("@") || textLineTrim.startsWith(":")) &&
+      textLineTrim.endsWith("{")
+    ) {
       let isCss = false;
       //@bg: { -> ['@bg' , ' {']
       let [objectName] = textLineTrim.split(":");
@@ -82,11 +85,26 @@ function removeInvalidVariablesWithLess(
 
       recordObjectVariableLineNumber[currentObjectName].start = lineNumber;
     }
-    if (textLineTrim.includes("}")) {
+    if (currentObjectName && textLineTrim.includes("}")) {
       recordObjectVariableLineNumber[currentObjectName].end = lineNumber;
       currentObjectName = "";
     }
   }
+
+  return recordObjectVariableLineNumber;
+}
+
+/**
+ * 删除Map中，less文件下已注释的变量
+ * @param text 文件内容
+ */
+function removeInvalidVariablesWithLess(
+  varMapper: Map<string, Set<string>>,
+  text: string
+) {
+  const textSplit = text.split("\n");
+
+  const objectVariableLineNumber = objectVariableLineMap(text);
 
   for (let lineNumber = 0; lineNumber < textSplit.length; lineNumber++) {
     const textLineTrim = textSplit[lineNumber].trim();
@@ -102,11 +120,8 @@ function removeInvalidVariablesWithLess(
 
       const varibalesSet = varMapper.get(normalizedValue);
 
-      for (const ojectVariableKey of Object.keys(
-        recordObjectVariableLineNumber
-      )) {
-        const ojectVariableValue =
-          recordObjectVariableLineNumber[ojectVariableKey];
+      for (const ojectVariableKey of Object.keys(objectVariableLineNumber)) {
+        const ojectVariableValue = objectVariableLineNumber[ojectVariableKey];
         if (
           ojectVariableValue.start < lineNumber &&
           lineNumber < ojectVariableValue.end
@@ -317,7 +332,6 @@ function diagnosticsCore(
   if (document.languageId === "vue") {
     text = text.slice(text.indexOf("<style"), text.lastIndexOf("</style>"));
   }
-  console.log(text);
 
   // const colorRegEx =
   //   /(#(?:[0-9a-fA-F]{3,8})|rgba?\((?:\d{1,3}%?,\s?){3,4}\)|hsla?\((?:\d{1,3}%?,\s?){2,4}\)|\b[a-zA-Z]+\b)/gi;
@@ -345,6 +359,39 @@ function diagnosticsCore(
   //     }
   //   }
   // }
+  const textSplit = text.split("\n");
+  try {
+    const objectVariableLineNumber = objectVariableLineMap(text);
+    for (let lineNumber = 0; lineNumber < textSplit.length; lineNumber++) {
+      // 不检查：注释变量、变量颜色
+      let isContinue = false;
+
+      const textLineTrim = textSplit[lineNumber].trim();
+      for (const passSymbol of ["@", "--", "$", "//"]) {
+        if (textLineTrim.startsWith(passSymbol)) {
+          isContinue = true;
+        }
+      }
+      for (const ojectVariableKey of Object.keys(objectVariableLineNumber)) {
+        const ojectVariableValue = objectVariableLineNumber[ojectVariableKey];
+        if (
+          !isContinue &&
+          ojectVariableValue.start < lineNumber &&
+          lineNumber < ojectVariableValue.end
+        ) {
+          isContinue = true;
+        }
+      }
+      if (isContinue) {
+        continue;
+      }
+
+      //应该检查的
+      console.log(textLineTrim);
+    }
+  } catch (error) {
+    console.log(error);
+  }
 }
 
 function updateDiagnostics(document: vscode.TextDocument) {
