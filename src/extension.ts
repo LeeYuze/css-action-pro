@@ -38,6 +38,92 @@ function normalizeColorValue(str: string) {
   }
 }
 
+/**
+ * 删除Map中，less文件下已注释的变量
+ * @param text 文件内容
+ */
+function removeInvalidVariablesWithLess(
+  varMapper: Map<string, Set<string>>,
+  text: string
+) {
+  const textSplit = text.split("\n");
+
+  // 记录对象定义遍历时，这个对象所在的行数
+  const recordObjectVariableLineNumber: Record<
+    string,
+    { start: number; end: number; isCss: boolean }
+  > = {};
+  let currentObjectName = "";
+
+  for (let lineNumber = 0; lineNumber < textSplit.length; lineNumber++) {
+    const textLineTrim = textSplit[lineNumber].trim();
+    if (textLineTrim.endsWith("{")) {
+      let isCss = false;
+      //@bg: { -> ['@bg' , ' {']
+      let [objectName] = textLineTrim.split(":");
+
+      // 遇到:root的情况
+      if (textLineTrim.startsWith(":")) {
+        objectName = textLineTrim
+          .slice(0, textLineTrim.lastIndexOf("{"))
+          .trim();
+        isCss = true;
+      }
+
+      currentObjectName = objectName;
+
+      if (!recordObjectVariableLineNumber[currentObjectName]) {
+        recordObjectVariableLineNumber[currentObjectName] = {
+          start: -1,
+          end: -1,
+          isCss, // 是不是css的全局 :root
+        };
+      }
+
+      recordObjectVariableLineNumber[currentObjectName].start = lineNumber;
+    }
+    if (textLineTrim.includes("}")) {
+      recordObjectVariableLineNumber[currentObjectName].end = lineNumber;
+      currentObjectName = "";
+    }
+  }
+
+  for (let lineNumber = 0; lineNumber < textSplit.length; lineNumber++) {
+    const textLineTrim = textSplit[lineNumber].trim();
+    if (textLineTrim.startsWith("//")) {
+      const textLineWithoutSymbol = textLineTrim
+        .replace(/^\/\//, "")
+        .trimStart();
+      let [key, value] = textLineWithoutSymbol.split(":");
+      key = key.trim();
+      value = value.replace(";", "").trim();
+      const normalizedValue =
+        normalizeSizeValue(value) || normalizeColorValue(value) || value || "";
+
+      const varibalesSet = varMapper.get(normalizedValue);
+
+      for (const ojectVariableKey of Object.keys(
+        recordObjectVariableLineNumber
+      )) {
+        const ojectVariableValue =
+          recordObjectVariableLineNumber[ojectVariableKey];
+        if (
+          ojectVariableValue.start < lineNumber &&
+          lineNumber < ojectVariableValue.end
+        ) {
+          let removeKey = `${ojectVariableKey}[${key}]`;
+          if (ojectVariableValue.isCss) {
+            removeKey = `var(${key})`;
+          }
+          varibalesSet?.delete(removeKey);
+        }
+      }
+
+      varibalesSet?.delete(key);
+    }
+  }
+}
+
 function getVariablesMapper(paths: string[]) {
   const varMapper = new Map<string, Set<string>>();
   try {
@@ -47,8 +133,9 @@ function getVariablesMapper(paths: string[]) {
         /((?:\$|@|--)[\w-]+)\s*:\s*{([^}]+)}/gi
       );
       const variableMatches = text.matchAll(
-        /(?<!\/\/\s*)((?:\$|@|--)[\w-]+)\s*:[ \t]*([^;\n]+)/gi
+        /((?:\$|@|--)[\w-]+)\s*:[ \t]*([^;\n]+)/gi
       );
+
       if (objectMatches) {
         for (const match of objectMatches) {
           const [fullMatch, objectVarName, objectVarBody] = match;
@@ -61,7 +148,6 @@ function getVariablesMapper(paths: string[]) {
 
           for (const objectMatch of objectMatches) {
             const [key, value] = [objectMatch[1], objectMatch[2]];
-
             // 构建变量名格式为 @bg[key]
             const variableName = `@${objectVarNameWithoutSymbol}[${key}]`;
 
@@ -82,9 +168,9 @@ function getVariablesMapper(paths: string[]) {
       if (variableMatches) {
         for (const match of variableMatches) {
           let [varName, varValue] = [match[1], match[2]];
-          if (varValue[0] !== "#") {
-            continue;
-          }
+          // if (varValue[0] !== "#") {
+          //   continue;
+          // }
           varValue =
             normalizeSizeValue(varValue) ||
             normalizeColorValue(varValue) ||
@@ -100,10 +186,14 @@ function getVariablesMapper(paths: string[]) {
           varMapper.get(varValue)!.add(varName);
         }
       }
+      // 找出所有前面带//的注释变量，将它在varMapper中删除
+      removeInvalidVariablesWithLess(varMapper, text);
     }
 
     return varMapper;
   } catch (error) {
+    console.log(error);
+
     return new Map();
   }
 }
@@ -173,7 +263,7 @@ export async function showQuickPick() {
 
 function loadVariables() {
   let allVariableFiles: string[] = [];
-
+  variableMapper = new Map<string, Set<string>>();
   if (
     variablesDirectory &&
     vscode.workspace.workspaceFolders &&
@@ -196,7 +286,7 @@ function loadVariables() {
   if (allVariableFiles.length > 0) {
     variableMapper = getVariablesMapper(allVariableFiles);
   } else {
-    vscode.window.showErrorMessage("No variable files or directories are set.");
+    // vscode.window.showErrorMessage("No variable files or directories are set.");
   }
 }
 function getAllFilesInDirectory(dir: string, extensions: string[]): string[] {
@@ -222,31 +312,39 @@ function diagnosticsCore(
     range: vscode.Range;
   }) => void
 ) {
-  const text = document.getText();
-  const colorRegEx =
-    /(#(?:[0-9a-fA-F]{3,8})|rgba?\((?:\d{1,3}%?,\s?){3,4}\)|hsla?\((?:\d{1,3}%?,\s?){2,4}\)|\b[a-zA-Z]+\b)/gi;
-  const variableRegEx =
-    /[@$--]\w+\s*:\s*#(?:[0-9a-fA-F]{3,8})|rgba?\((?:\d{1,3}%?,\s?){3,4}\)|hsla?\((?:\d{1,3}%?,\s?){2,4}\)/gi;
-  let match: RegExpExecArray | null;
-  while ((match = colorRegEx.exec(text)) !== null) {
-    const colorValue = match[0].trim();
-    const normalizedColor = normalizeColorValue(colorValue);
-
-    // 忽略 CSS 变量定义
-    if (!variableRegEx.test(text.substring(0, match.index + match[0].length))) {
-      if (normalizedColor && variableMapper.has(normalizedColor)) {
-        const startPos = document.positionAt(match.index);
-        const endPos = document.positionAt(match.index + colorValue.length);
-        const range = new vscode.Range(startPos, endPos);
-        const payload = {
-          normalizedColor,
-          colorValue,
-          range,
-        };
-        callback(payload);
-      }
-    }
+  let text = document.getText();
+  // vue只检查<style></style>部分
+  if (document.languageId === "vue") {
+    text = text.slice(text.indexOf("<style"), text.lastIndexOf("</style>"));
   }
+  console.log(text);
+
+  // const colorRegEx =
+  //   /(#(?:[0-9a-fA-F]{3,8})|rgba?\((?:\d{1,3}%?,\s?){3,4}\)|hsla?\((?:\d{1,3}%?,\s?){2,4}\)|\b[a-zA-Z]+\b)/gi;
+  // const variableRegEx =
+  //   /[@$--]\w+\s*:\s*#(?:[0-9a-fA-F]{3,8})|rgba?\((?:\d{1,3}%?,\s?){3,4}\)|hsla?\((?:\d{1,3}%?,\s?){2,4}\)/gi;
+  // let match: RegExpExecArray | null;
+  // while ((match = colorRegEx.exec(text)) !== null) {
+  //   const colorValue = match[0].trim();
+  //   const normalizedColor = normalizeColorValue(colorValue);
+  //   console.log(normalizedColor);
+
+  //   // 忽略 CSS 变量定义
+  //   if (!variableRegEx.test(text.substring(0, match.index + match[0].length))) {
+  //     if (normalizedColor && variableMapper.has(normalizedColor)) {
+
+  //       const startPos = document.positionAt(match.index);
+  //       const endPos = document.positionAt(match.index + colorValue.length);
+  //       const range = new vscode.Range(startPos, endPos);
+  //       const payload = {
+  //         normalizedColor,
+  //         colorValue,
+  //         range,
+  //       };
+  //       callback(payload);
+  //     }
+  //   }
+  // }
 }
 
 function updateDiagnostics(document: vscode.TextDocument) {
