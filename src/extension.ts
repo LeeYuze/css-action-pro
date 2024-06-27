@@ -55,7 +55,7 @@ function objectVariableLineMap(text: string) {
 
   for (let lineNumber = 0; lineNumber < textSplit.length; lineNumber++) {
     const textLineTrim = textSplit[lineNumber].trim();
-    console.log(textLineTrim);
+    // console.log(textLineTrim);
 
     if (
       (textLineTrim.startsWith("@") || textLineTrim.startsWith(":")) &&
@@ -328,10 +328,25 @@ function diagnosticsCore(
   }) => void
 ) {
   let text = document.getText();
+
+  let textSplit = text.split("\n");
+  console.log(textSplit);
+
   // vue只检查<style></style>部分
   if (document.languageId === "vue") {
     text = text.slice(text.indexOf("<style"), text.lastIndexOf("</style>"));
   }
+  let styleLinenumber = 0;
+  for (let lineNumber = 0; lineNumber < textSplit.length; lineNumber++) {
+    const textLine = textSplit[lineNumber];
+    const pattern = /^(.*<style\b[^>]*>.*)$/;
+
+    if (pattern.test(textLine)) {
+      styleLinenumber = lineNumber;
+      break;
+    }
+  }
+  
 
   // const colorRegEx =
   //   /(#(?:[0-9a-fA-F]{3,8})|rgba?\((?:\d{1,3}%?,\s?){3,4}\)|hsla?\((?:\d{1,3}%?,\s?){2,4}\)|\b[a-zA-Z]+\b)/gi;
@@ -359,16 +374,20 @@ function diagnosticsCore(
   //     }
   //   }
   // }
-  const textSplit = text.split("\n");
+
+  textSplit = text.split("\n");
   try {
     const objectVariableLineNumber = objectVariableLineMap(text);
     for (let lineNumber = 0; lineNumber < textSplit.length; lineNumber++) {
+      const textLineTrim = textSplit[lineNumber].trim();
+
       // 不检查：注释变量、变量颜色
       let isContinue = false;
+      const realLineNumber = lineNumber + styleLinenumber;
+      console.log(textLineTrim, realLineNumber);
 
-      const textLineTrim = textSplit[lineNumber].trim();
       for (const passSymbol of ["@", "--", "$", "//"]) {
-        if (textLineTrim.startsWith(passSymbol)) {
+        if (textLineTrim.indexOf(passSymbol) > -1) {
           isContinue = true;
         }
       }
@@ -376,17 +395,35 @@ function diagnosticsCore(
         const ojectVariableValue = objectVariableLineNumber[ojectVariableKey];
         if (
           !isContinue &&
-          ojectVariableValue.start < lineNumber &&
-          lineNumber < ojectVariableValue.end
+          ojectVariableValue.start < realLineNumber &&
+          realLineNumber < ojectVariableValue.end
         ) {
           isContinue = true;
         }
       }
+      //应该检查的
+      let [colorKey, colorValue] = textLineTrim.split(":");
+      if (colorValue) {
+        colorValue = colorValue.trim();
+      }
+      for (const filterSymbol of ["#", "rgba", "hsla"]) {
+        // console.log(colorValue, colorValue.startsWith(filterSymbol));
+        // console.log(isContinue, colorValue, colorValue.indexOf(filterSymbol));
+
+        if (
+          !isContinue &&
+          (!colorValue || colorValue.indexOf(filterSymbol) === -1)
+        ) {
+          isContinue = true;
+          break;
+        }
+      }
+      // console.log(isContinue, colorKey, colorValue);
+
       if (isContinue) {
         continue;
       }
 
-      //应该检查的
       console.log(textLineTrim);
     }
   } catch (error) {
