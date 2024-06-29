@@ -331,7 +331,7 @@ function diagnosticsCore(
 ) {
   let text = document.getText();
 
-  console.log(text);
+  // console.log(text);
 
   let textSplit = text.split("\n");
   // console.log(textSplit);
