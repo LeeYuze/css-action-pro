@@ -568,33 +568,33 @@ function init(context: vscode.ExtensionContext) {
       updateDiagnostics(event.document);
     })
   );
-  // // 打开文件
-  // context.subscriptions.push(
-  //   vscode.workspace.onDidOpenTextDocument((document) => {
-  //     if (!isSupportbyLanguages(document)) {
-  //       return;
-  //     }
+  // 打开文件
+  context.subscriptions.push(
+    vscode.workspace.onDidOpenTextDocument((document) => {
+      if (!isSupportbyLanguages(document)) {
+        return;
+      }
 
-  //     updateDiagnostics(document);
-  //   })
-  // );
-  //   // 保存文件
-  //   context.subscriptions.push(
-  //     vscode.workspace.onDidSaveTextDocument((document) => {
-  //       if (!isSupportbyLanguages(document)) {
-  //         return;
-  //       }
-  //       workbenchConfig = getWorkbenchConfig();
-  //       isAutoReplace = workbenchConfig.get<boolean>("autoReplace") || false;
+      updateDiagnostics(document);
+    })
+  );
+  // 保存文件
+  context.subscriptions.push(
+    vscode.workspace.onDidSaveTextDocument((document) => {
+      if (!isSupportbyLanguages(document)) {
+        return;
+      }
+      workbenchConfig = getWorkbenchConfig();
+      isAutoReplace = workbenchConfig.get<boolean>("autoReplace") || false;
 
-  //       if (isAutoReplace) {
-  //         autoReplaceVariables(document, isAutoReplace);
-  //         updateDiagnostics(document);
-  //       } else {
-  //         updateDiagnostics(document);
-  //       }
-  //     })
-  //   );
+      if (isAutoReplace) {
+        autoReplaceVariables(document, isAutoReplace);
+        updateDiagnostics(document);
+      } else {
+        updateDiagnostics(document);
+      }
+    })
+  );
 }
 
 export function activate(context: vscode.ExtensionContext) {
