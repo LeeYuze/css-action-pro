@@ -43,7 +43,7 @@ function normalizeColorValue(str: string) {
  * @param text
  * @returns
  */
-function objectVariableLineMap(text: string) {
+function objectVariableLineMap(text: string, offsetLineNumber: number = 0) {
   const textSplit = text.split("\n");
 
   // 记录对象定义遍历时，这个对象所在的行数
@@ -83,10 +83,12 @@ function objectVariableLineMap(text: string) {
         };
       }
 
-      recordObjectVariableLineNumber[currentObjectName].start = lineNumber;
+      recordObjectVariableLineNumber[currentObjectName].start =
+        lineNumber + offsetLineNumber;
     }
     if (currentObjectName && textLineTrim.includes("}")) {
-      recordObjectVariableLineNumber[currentObjectName].end = lineNumber;
+      recordObjectVariableLineNumber[currentObjectName].end =
+        lineNumber + offsetLineNumber;
       currentObjectName = "";
     }
   }
@@ -329,102 +331,127 @@ function diagnosticsCore(
 ) {
   let text = document.getText();
 
-  let textSplit = text.split("\n");
-  console.log(textSplit);
+  console.log(text);
 
+  let textSplit = text.split("\n");
+  // console.log(textSplit);
+
+  let styleLinenumber = 0;
+
+  // 每一行的尾部的index
+  // <style lang="less" scoped> 26 实际上显示27 因为算上换行
+  let textSplitEndIndex = 0;
+  let textSplitEndIndexArr = [];
+  let textSplitEndIndexArrIndex = 0;
   // vue只检查<style></style>部分
   if (document.languageId === "vue") {
     text = text.slice(text.indexOf("<style"), text.lastIndexOf("</style>"));
-  }
-  let styleLinenumber = 0;
-  for (let lineNumber = 0; lineNumber < textSplit.length; lineNumber++) {
-    const textLine = textSplit[lineNumber];
-    const pattern = /^(.*<style\b[^>]*>.*)$/;
 
-    if (pattern.test(textLine)) {
-      styleLinenumber = lineNumber;
-      break;
+    for (let lineNumber = 0; lineNumber < textSplit.length; lineNumber++) {
+      const textLine = textSplit[lineNumber];
+      const pattern = /^(.*<style\b[^>]*>.*)$/;
+
+      if (pattern.test(textLine)) {
+        styleLinenumber = lineNumber;
+        break;
+      }
+      textSplitEndIndex += textLine.length + 1;
+      textSplitEndIndexArr.push(textSplitEndIndex);
+      textSplitEndIndexArrIndex += 1;
     }
   }
-  
-
-  // const colorRegEx =
-  //   /(#(?:[0-9a-fA-F]{3,8})|rgba?\((?:\d{1,3}%?,\s?){3,4}\)|hsla?\((?:\d{1,3}%?,\s?){2,4}\)|\b[a-zA-Z]+\b)/gi;
-  // const variableRegEx =
-  //   /[@$--]\w+\s*:\s*#(?:[0-9a-fA-F]{3,8})|rgba?\((?:\d{1,3}%?,\s?){3,4}\)|hsla?\((?:\d{1,3}%?,\s?){2,4}\)/gi;
-  // let match: RegExpExecArray | null;
-  // while ((match = colorRegEx.exec(text)) !== null) {
-  //   const colorValue = match[0].trim();
-  //   const normalizedColor = normalizeColorValue(colorValue);
-  //   console.log(normalizedColor);
-
-  //   // 忽略 CSS 变量定义
-  //   if (!variableRegEx.test(text.substring(0, match.index + match[0].length))) {
-  //     if (normalizedColor && variableMapper.has(normalizedColor)) {
-
-  //       const startPos = document.positionAt(match.index);
-  //       const endPos = document.positionAt(match.index + colorValue.length);
-  //       const range = new vscode.Range(startPos, endPos);
-  //       const payload = {
-  //         normalizedColor,
-  //         colorValue,
-  //         range,
-  //       };
-  //       callback(payload);
-  //     }
-  //   }
-  // }
 
   textSplit = text.split("\n");
   try {
-    const objectVariableLineNumber = objectVariableLineMap(text);
+    const objectVariableLineNumber = objectVariableLineMap(
+      text,
+      styleLinenumber
+    );
     for (let lineNumber = 0; lineNumber < textSplit.length; lineNumber++) {
-      const textLineTrim = textSplit[lineNumber].trim();
+      const textLine = textSplit[lineNumber];
+      textSplitEndIndex += textLine.length + 1;
+      textSplitEndIndexArr.push(textSplitEndIndex);
+      textSplitEndIndexArrIndex += 1;
+      // console.log(textSplit[lineNumber], textSplitEndIndex);
+
+      const textLineTrim = textLine.trim();
 
       // 不检查：注释变量、变量颜色
       let isContinue = false;
       const realLineNumber = lineNumber + styleLinenumber;
-      console.log(textLineTrim, realLineNumber);
+      // console.log(textLineTrim, realLineNumber);
 
+      // 如果发现是变量或者注释，直接continue
       for (const passSymbol of ["@", "--", "$", "//"]) {
         if (textLineTrim.indexOf(passSymbol) > -1) {
           isContinue = true;
+          break;
         }
       }
+      if (isContinue) {
+        continue;
+      }
+      // console.log(isContinue, textLineTrim, realLineNumber);
+
+      // 如果发现是less类型式申明的颜色值，直接continue
       for (const ojectVariableKey of Object.keys(objectVariableLineNumber)) {
         const ojectVariableValue = objectVariableLineNumber[ojectVariableKey];
         if (
-          !isContinue &&
           ojectVariableValue.start < realLineNumber &&
           realLineNumber < ojectVariableValue.end
         ) {
           isContinue = true;
         }
       }
-      //应该检查的
-      let [colorKey, colorValue] = textLineTrim.split(":");
-      if (colorValue) {
-        colorValue = colorValue.trim();
-      }
-      for (const filterSymbol of ["#", "rgba", "hsla"]) {
-        // console.log(colorValue, colorValue.startsWith(filterSymbol));
-        // console.log(isContinue, colorValue, colorValue.indexOf(filterSymbol));
-
-        if (
-          !isContinue &&
-          (!colorValue || colorValue.indexOf(filterSymbol) === -1)
-        ) {
-          isContinue = true;
-          break;
-        }
-      }
-      // console.log(isContinue, colorKey, colorValue);
-
       if (isContinue) {
         continue;
       }
 
-      console.log(textLineTrim);
+      // 如果发现不是颜色值，直接continue
+      let [colorKey, colorValue] = textLineTrim.split(":");
+      if (!colorValue) {
+        continue;
+      }
+      const filterSymbolArr = ["#", "rgba", "hsla"];
+      let filterCount = 0;
+      for (const filterSymbol of filterSymbolArr) {
+        colorValue = colorValue.trim();
+        if (colorValue.indexOf(filterSymbol) === -1) {
+          filterCount += 1;
+        }
+      }
+
+      if (filterCount === filterSymbolArr.length) {
+        continue;
+      }
+      colorValue = colorValue.endsWith(";")
+        ? colorValue.slice(0, -1)
+        : colorValue;
+      const normalizedColor = normalizeColorValue(colorValue);
+
+      // 如果颜色mapper不存在这个颜色值，直接continue
+      if (normalizedColor && !variableMapper.has(normalizedColor)) {
+        continue;
+      }
+      if (!normalizedColor) {
+        return;
+      }
+      // 这个颜色变量值的位置公式：上一行最后文本位置，就是本行的首位
+      // 上一行最后文本的位置 + 颜色值在这行的index
+      const startIndex =
+        textSplitEndIndexArr[textSplitEndIndexArrIndex - 2] +
+        textLine.indexOf(colorValue);
+      const startPos = document.positionAt(startIndex);
+      const endPos = document.positionAt(startIndex + colorValue.length);
+      const range = new vscode.Range(startPos, endPos);
+      const payload = {
+        normalizedColor,
+        colorValue,
+        range,
+      };
+      callback(payload);
+
+      // console.log(colorKey, colorValue);
     }
   } catch (error) {
     console.log(error);
@@ -432,8 +459,8 @@ function diagnosticsCore(
 }
 
 function updateDiagnostics(document: vscode.TextDocument) {
+  diagnosticCollection.clear();
   const diagnostics: vscode.Diagnostic[] = [];
-
   diagnosticsCore(document, ({ range, colorValue }) => {
     const diagnostic = new vscode.Diagnostic(
       range,
@@ -541,33 +568,33 @@ function init(context: vscode.ExtensionContext) {
       updateDiagnostics(event.document);
     })
   );
-  // 打开文件
-  context.subscriptions.push(
-    vscode.workspace.onDidOpenTextDocument((document) => {
-      if (!isSupportbyLanguages(document)) {
-        return;
-      }
+  // // 打开文件
+  // context.subscriptions.push(
+  //   vscode.workspace.onDidOpenTextDocument((document) => {
+  //     if (!isSupportbyLanguages(document)) {
+  //       return;
+  //     }
 
-      updateDiagnostics(document);
-    })
-  );
-  // 保存文件
-  context.subscriptions.push(
-    vscode.workspace.onDidSaveTextDocument((document) => {
-      if (!isSupportbyLanguages(document)) {
-        return;
-      }
-      workbenchConfig = getWorkbenchConfig();
-      isAutoReplace = workbenchConfig.get<boolean>("autoReplace") || false;
+  //     updateDiagnostics(document);
+  //   })
+  // );
+  //   // 保存文件
+  //   context.subscriptions.push(
+  //     vscode.workspace.onDidSaveTextDocument((document) => {
+  //       if (!isSupportbyLanguages(document)) {
+  //         return;
+  //       }
+  //       workbenchConfig = getWorkbenchConfig();
+  //       isAutoReplace = workbenchConfig.get<boolean>("autoReplace") || false;
 
-      if (isAutoReplace) {
-        autoReplaceVariables(document, isAutoReplace);
-        updateDiagnostics(document);
-      } else {
-        updateDiagnostics(document);
-      }
-    })
-  );
+  //       if (isAutoReplace) {
+  //         autoReplaceVariables(document, isAutoReplace);
+  //         updateDiagnostics(document);
+  //       } else {
+  //         updateDiagnostics(document);
+  //       }
+  //     })
+  //   );
 }
 
 export function activate(context: vscode.ExtensionContext) {

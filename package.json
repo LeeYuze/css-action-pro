@@ -1,8 +1,8 @@
 {
   "name": "css-action-pro",
-  "displayName": "css-action-pro - css variables helper",
+  "displayName": "css-action-pro - vue css variables helper",
   "description": "A vscode extension help editing scss/less/css file with color replace and px convert.",
-  "version": "1.4.2",
+  "version": "1.4.3",
   "publisher": "leeyuze",
   "engines": {
     "vscode": "^1.32.0"
