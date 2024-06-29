@@ -493,13 +493,17 @@ function getWorkbenchConfig() {
   return workbenchConfig;
 }
 
-function init(context: vscode.ExtensionContext) {
+function getConfig() {
   workbenchConfig = getWorkbenchConfig();
   variablesFilePaths = workbenchConfig.get<string[]>("variablesFiles");
   variablesDirectory = workbenchConfig.get<string>("variablesDirectory");
   rootFontSize = workbenchConfig.get<number>("rootFontSize")!;
   pxReplaceOptions = workbenchConfig.get<string[]>("pxReplaceOptions")!;
   colorReplaceOptions = workbenchConfig.get<string[]>("colorReplaceOptions")!;
+}
+
+function init(context: vscode.ExtensionContext) {
+  getConfig();
 
   const supportedLanguages = ColorVarReplacer.documentSelectors.map(
     (item) => item.language
@@ -568,6 +572,7 @@ function init(context: vscode.ExtensionContext) {
       updateDiagnostics(event.document);
     })
   );
+  
   // 打开文件
   context.subscriptions.push(
     vscode.workspace.onDidOpenTextDocument((document) => {
@@ -578,6 +583,7 @@ function init(context: vscode.ExtensionContext) {
       updateDiagnostics(document);
     })
   );
+
   // 保存文件
   context.subscriptions.push(
     vscode.workspace.onDidSaveTextDocument((document) => {
