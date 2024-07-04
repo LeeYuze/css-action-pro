@@ -3,6 +3,7 @@ import { readFileSync, readdirSync, statSync } from "fs";
 import path, { join } from "path";
 import { render } from "ejs";
 import tinycolor from "tinycolor2";
+import { log } from "console";
 
 enum BultinTemplateVar {
   remResult = "_REM_RESULT_",
@@ -114,8 +115,11 @@ function removeInvalidVariablesWithLess(
       const textLineWithoutSymbol = textLineTrim
         .replace(/^\/\//, "")
         .trimStart();
+
       let [key, value] = textLineWithoutSymbol.split(":");
       key = key.trim();
+      if (!value) {continue;}
+      
       value = value.replace(";", "").trim();
       const normalizedValue =
         normalizeSizeValue(value) || normalizeColorValue(value) || value || "";
@@ -572,7 +576,7 @@ function init(context: vscode.ExtensionContext) {
       updateDiagnostics(event.document);
     })
   );
-  
+
   // 打开文件
   context.subscriptions.push(
     vscode.workspace.onDidOpenTextDocument((document) => {
