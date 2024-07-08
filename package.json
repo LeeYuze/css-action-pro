@@ -19,6 +19,10 @@
           "type": "boolean",
           "description": "auto replace style variables."
         },
+        "cssActionPro.variablesFiles": {
+          "type": "array",
+          "description": "style variables files paths."
+        },
         "cssActionPro.variablesDirectory": {
           "type": "string",
           "description": "style variables files folders."

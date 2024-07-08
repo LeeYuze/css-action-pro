@@ -3,7 +3,6 @@ import { readFileSync, readdirSync, statSync } from "fs";
 import path, { join } from "path";
 import { render } from "ejs";
 import tinycolor from "tinycolor2";
-import { log } from "console";
 
 enum BultinTemplateVar {
   remResult = "_REM_RESULT_",
