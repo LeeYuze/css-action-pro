@@ -31,8 +31,14 @@ function normalizeSizeValue(str: string) {
 
 function normalizeColorValue(str: string) {
   if (str) {
+    // fix: rgba以%作为单位时匹配错误的问题
+    str = str.replace(/(\d+(\.\d+)?)%/, (match, p1) =>
+      String(parseFloat(p1) / 100)
+    );
+
     const color = tinycolor(str);
-    return color.isValid() ? tinycolor(str).toHex8String() : null;
+
+    return color.isValid() ? color.toHex8String() : null;
   } else {
     return null;
   }
@@ -117,8 +123,10 @@ function removeInvalidVariablesWithLess(
 
       let [key, value] = textLineWithoutSymbol.split(":");
       key = key.trim();
-      if (!value) {continue;}
-      
+      if (!value) {
+        continue;
+      }
+
       value = value.replace(";", "").trim();
       const normalizedValue =
         normalizeSizeValue(value) || normalizeColorValue(value) || value || "";
@@ -430,7 +438,8 @@ function diagnosticsCore(
       colorValue = colorValue.endsWith(";")
         ? colorValue.slice(0, -1)
         : colorValue;
-      const normalizedColor = normalizeColorValue(colorValue);
+
+      const normalizedColor = normalizeColorValue(colorValue);      
 
       // 如果颜色mapper不存在这个颜色值，直接continue
       if (normalizedColor && !variableMapper.has(normalizedColor)) {
@@ -733,7 +742,7 @@ class ColorVarReplacer extends RegexReplacer {
   public regex = colorRegex;
 
   public getReplaceTargets(originText: string): string[] {
-    const colorStr = tinycolor(originText).toHex8String();
+    const colorStr = normalizeColorValue(originText) as string;
     const varNames = variableMapper.get(colorStr) || new Set();
     const context = {
       [BultinTemplateVar.matchedText]: originText,
